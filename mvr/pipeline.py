@@ -64,25 +64,44 @@ def step_features(cfg: Config, progress: ProgressFn = None, force: bool = False)
     enc = get_encoder(cfg)
     T = cfg.num_frames
 
+    # Per-clip cache: every encoded clip is saved immediately, so an interrupted run (e.g. a lab
+    # session timeout) resumes from where it stopped instead of starting over.
+    cache_dir = Path(cfg.artifacts_dir) / "clip_cache" / f"{cfg.model_tag}_T{T}"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    timing_file = cache_dir / "timing.json"
+    timing = json.loads(timing_file.read_text()) if timing_file.exists() else {"n": 0, "dec": 0.0, "enc": 0.0}
+
     def encode_videos(items, lo, hi, label):
-        feats, ok_ids, t_dec, t_enc = [], [], 0.0, 0.0
+        feats, ok_ids, n_cached = [], [], 0
         for i, v in enumerate(items):
+            cf = cache_dir / f"{v['video_id']}.npy"
+            if cf.exists():
+                feats.append(np.load(cf))
+                ok_ids.append(i)
+                n_cached += 1
+                continue
             path = cfg.videos_dir / f"{v['video_id']}.mp4"
             try:
                 t0 = time.perf_counter()
                 frames, _ = read_video_frames(path, T)
                 t1 = time.perf_counter()
-                feats.append(enc.encode_frames(frames, cfg.batch_size))
-                t_enc += time.perf_counter() - t1
-                t_dec += t1 - t0
+                f = enc.encode_frames(frames, cfg.batch_size).astype(np.float32)
+                timing["enc"] += time.perf_counter() - t1
+                timing["dec"] += t1 - t0
+                timing["n"] += 1
+                np.save(cf, f)
+                feats.append(f)
                 ok_ids.append(i)
             except Exception:
                 continue
             if i % 5 == 0:
-                _p(progress, lo + (hi - lo) * (i + 1) / len(items), f"{label}: {i+1}/{len(items)} clips")
-        return np.stack(feats) if feats else np.zeros((0, T, enc.dim), np.float32), ok_ids, t_dec, t_enc
+                timing_file.write_text(json.dumps(timing))
+                _p(progress, lo + (hi - lo) * (i + 1) / len(items),
+                   f"{label}: {i+1}/{len(items)} clips ({n_cached} from cache)")
+        timing_file.write_text(json.dumps(timing))
+        return np.stack(feats) if feats else np.zeros((0, T, enc.dim), np.float32), ok_ids
 
-    index_frames, ok, t_dec, t_enc = encode_videos(subset["index"], 0.0, 0.35, "Encoding index clip frames")
+    index_frames, ok = encode_videos(subset["index"], 0.0, 0.35, "Encoding index clip frames")
     if len(ok) != len(subset["index"]):
         raise RuntimeError("Some index videos could not be decoded; re-run the data step with force.")
     _p(progress, 0.36, "Encoding the 200 text queries")
@@ -90,22 +109,35 @@ def step_features(cfg: Config, progress: ProgressFn = None, force: bool = False)
     query_emb = enc.encode_text([q["text"] for q in subset["queries"]])
     t_text = time.perf_counter() - t0
 
-    train_frames, ok_tr, _, _ = encode_videos(subset["train"], 0.38, 0.85, "Encoding training clip frames")
+    train_frames, ok_tr = encode_videos(subset["train"], 0.38, 0.85, "Encoding training clip frames")
     train_items = [subset["train"][i] for i in ok_tr]
     C = 20
     train_text = np.zeros((len(train_items), C, enc.dim), np.float32)
     text_mask = np.zeros((len(train_items), C), bool)
-    flat, owner = [], []
+    todo = []
     for i, t in enumerate(train_items):
-        for j, c in enumerate(t["captions"][:C]):
-            flat.append(c)
-            owner.append((i, j))
-    for b in range(0, len(flat), 2048):
-        _p(progress, 0.86 + 0.13 * b / max(len(flat), 1), f"Encoding training captions {b}/{len(flat)}")
-        E = enc.encode_text(flat[b:b + 2048])
-        for (i, j), e in zip(owner[b:b + 2048], E):
-            train_text[i, j] = e
-            text_mask[i, j] = True
+        cf = cache_dir / f"{t['video_id']}_captions.npy"
+        n = len(t["captions"][:C])
+        if cf.exists():
+            E = np.load(cf)
+            train_text[i, :len(E)] = E
+            text_mask[i, :len(E)] = True
+        else:
+            todo.append((i, t, n))
+    for k in range(0, len(todo), 100):   # 100 clips (~2000 captions) per batch, cached per clip
+        _p(progress, 0.86 + 0.13 * k / max(len(todo), 1), f"Encoding training captions: clip {k}/{len(todo)}")
+        chunk = todo[k:k + 100]
+        flat = [c for _, t, n in chunk for c in t["captions"][:n]]
+        E = enc.encode_text(flat)
+        pos = 0
+        for i, t, n in chunk:
+            e = E[pos:pos + n].astype(np.float32)
+            pos += n
+            np.save(cache_dir / f"{t['video_id']}_captions.npy", e)
+            train_text[i, :n] = e
+            text_mask[i, :n] = True
+    n_enc = max(timing["n"], 1)
+    t_dec, t_enc = timing["dec"] / n_enc, timing["enc"] / n_enc
 
     out = {"index_ids": np.array([v["video_id"] for v in subset["index"]]),
            "query_texts": np.array([q["text"] for q in subset["queries"]]),
@@ -113,7 +145,7 @@ def step_features(cfg: Config, progress: ProgressFn = None, force: bool = False)
            "train_frames": train_frames.astype(np.float32), "train_text": train_text, "text_mask": text_mask,
            "train_ids": np.array([t["video_id"] for t in train_items]),
            "timing": np.array(json.dumps({
-               "decode_s_per_video": t_dec / len(ok), "encode_s_per_video": t_enc / len(ok),
+               "decode_s_per_video": t_dec, "encode_s_per_video": t_enc,
                "text_encode_ms_per_query": 1000 * t_text / len(subset["queries"]),
                "device": cfg.resolved_device(), "model": cfg.clip_model, "frames_per_video": T}))}
     cfg.features_path.parent.mkdir(parents=True, exist_ok=True)

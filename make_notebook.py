@@ -57,7 +57,8 @@ explicit temporal modelling give superior retrieval?*
 | 13–14. Efficiency, technical report | 4 & 5 |
 | 15. Streamlit dashboard launched from the notebook | **3. Streamlit dashboard (2.0)** |
 
-> **Run:** `Kernel → Restart & Run All`. All steps cache their outputs (`data/`, `artifacts/`), so a re-run takes minutes.
+> **Run:** `Kernel → Restart & Run All`. All steps cache their outputs (`data/`, `artifacts/`), and frame features are
+> saved after every clip, so if the lab session is interrupted, simply `Restart & Run All` again – it resumes where it stopped.
 > Use the kernel **"Python (mmir-venv)"** – see the README for the one-time kernel registration.
 """)
 
