@@ -9,6 +9,13 @@ from .config import LEARNED_METHODS, METHOD_INFO, Config, method_label
 from .figures import make_all_figures
 
 
+TEAM = [("TILAK", "2025AE05975", "System design, data pipeline, CLIP features, FAISS retrieval, lab execution"),
+        ("OM PRAKASH UNIYAL", "2025AE05324", "Temporal models (pooling, Transformer, LSTM) and research ablation study"),
+        ("KIRAN P", "2025AE05409", "Evaluation metrics, significance tests and results analysis"),
+        ("GAURISHA MATHUR", "2025AE05642", "Streamlit dashboard and query edge-case handling"),
+        ("KARAN RUPANI", "2025AE05813", "Experiments write-up and technical report")]
+
+
 def build_report(cfg: Config, out: Path) -> Path:
     from docx import Document
     from docx.enum.table import WD_TABLE_ALIGNMENT
@@ -98,8 +105,7 @@ def build_report(cfg: Config, out: Path) -> Path:
     p = doc.add_paragraph("Course: Multimodal Information Retrieval  ·  Environment: BITS Virtual Lab")
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     table(["Group No.", "Member Name", "BITS ID", "Contribution"],
-          [["<Group No.>", "<Name 1>", "<ID 1>", "<…>"], ["", "<Name 2>", "<ID 2>", "<…>"],
-           ["", "<Name 3>", "<ID 3>", "<…>"], ["", "<Name 4>", "<ID 4>", "<…>"]], [2.5, 5.5, 4, 5])
+          [["10" if k == 0 else "", n, i, c] for k, (n, i, c) in enumerate(TEAM)], [2.2, 4.3, 3, 7.5])
     para(f"Results generated: {R['generated_at']}  ·  backbone: {R['config']['clip_model']}  ·  "
          f"{R['config']['num_frames']} frames/clip  ·  device: {R.get('timing', {}).get('device', 'n/a')}")
 
@@ -124,6 +130,8 @@ def build_report(cfg: Config, out: Path) -> Path:
         ["Training pool (learned heads only)", f"{pr['n_train']} clips from the 9k train split, all 20 captions; "
                                                  "disjoint from the index (asserted in code)"],
         ["Sampling", f"stratified by category, fixed seed {pr['seed']}; undecodable clips are skipped and replaced"],
+        ["Content filter", f"clips whose captions use sexual/explicit wording are excluded from index and training pool "
+                           f"({pr.get('n_excluded_by_content_filter', 0)} candidate clips skipped)"],
         ["Relevance", "T2V: the clip a caption describes (1 relevant / query). V2T: the 2 captions of a clip"],
     ], [5, 12])
     cats = {}

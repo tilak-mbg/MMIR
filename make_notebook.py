@@ -33,10 +33,11 @@ md(r"""
 
 | Group No. | Member | BITS ID | Contribution |
 |---|---|---|---|
-| `<Group No.>` | `<Name 1>` | `<ID 1>` | System design, data pipeline, CLIP feature extraction, FAISS retrieval, lab execution |
-| | `<Name 2>` | `<ID 2>` | Temporal models (pooling, Transformer, LSTM) and research ablation study |
-| | `<Name 3>` | `<ID 3>` | Evaluation metrics, significance tests and results analysis |
-| | `<Name 4>` | `<ID 4>` | Streamlit dashboard, query edge-case handling and technical report |
+| 10 | TILAK | 2025AE05975 | System design, data pipeline, CLIP features, FAISS retrieval, lab execution |
+| | OM PRAKASH UNIYAL | 2025AE05324 | Temporal models (pooling, Transformer, LSTM) and research ablation study |
+| | KIRAN P | 2025AE05409 | Evaluation metrics, significance tests and results analysis |
+| | GAURISHA MATHUR | 2025AE05642 | Streamlit dashboard and query edge-case handling |
+| | KARAN RUPANI | 2025AE05813 | Experiments write-up and technical report |
 
 **Task.** Build an end-to-end text→video retrieval system over MSR-VTT: index of **N = 100 clips** (5 clips × 20 categories),
 **Q = 200 queries** (2 captions per clip) → **200 × 100 search matrix**, served through a Streamlit dashboard, evaluated with
@@ -163,6 +164,8 @@ md(r"""
   Every candidate clip is decoded before acceptance; corrupt clips are replaced automatically.
 * **Queries:** 2 human captions per clip (the official 1k-A caption + one other) → 200 queries.
 * **Training pool:** clips from the 9k *train* split, **disjoint** from the index (asserted in code), used only by the learned temporal heads.
+* **Content filter:** MSR-VTT is crowd-captioned web video; clips whose captions use sexual/explicit wording are excluded
+  from both the index and the training pool (`is_sensitive()` in `mvr/data.py`), and replaced by the next sampled clip.
 """)
 code(r"""
 t0 = time.time()

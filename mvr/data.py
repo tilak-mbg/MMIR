@@ -317,12 +317,32 @@ def save_thumb_strip(frames: list[np.ndarray], out: Path, height: int = 96) -> N
 
 
 # ---------------------------------------------------------------------------
+# Content filter: academic submission -> exclude clips described with sexual /
+# explicit language (MSR-VTT is crowd-captioned web video and contains a few).
+# ---------------------------------------------------------------------------
+SENSITIVE_PATTERN = re.compile(
+    r"\b(sexy|sexily|sexual\w*|sex|nude|nudity|naked|topless|lingerie|porn\w*|erotic\w*|seductive\w*|"
+    r"seduc\w*|strip(per|pers|tease|teasing)|twerk\w*|boobs?|breasts?|cleavage|bikini\w*|"
+    r"underwear|panties|bra|hot girls?|kiss(es|ing)?|making out)\b", re.IGNORECASE)
+
+
+def is_sensitive(captions) -> bool:
+    """True if ANY caption of the clip uses sexual/explicit wording."""
+    return any(SENSITIVE_PATTERN.search(c or "") for c in captions)
+
+
+# ---------------------------------------------------------------------------
 # Subset construction (100 index clips / 200 queries / disjoint train pool)
 # ---------------------------------------------------------------------------
 def prepare_subset(cfg: Config, progress: ProgressFn = None, force: bool = False) -> dict:
     if cfg.subset_path.exists() and not force:
         subset = json.loads(cfg.subset_path.read_text())
-        if all((cfg.videos_dir / f"{v['video_id']}.mp4").exists() for v in subset["index"]):
+        flagged = [v["video_id"] for v in subset["index"] if is_sensitive(v.get("all_captions", v["queries"]))]
+        flagged += [t["video_id"] for t in subset.get("train", []) if is_sensitive(t["captions"])]
+        if flagged:
+            _p(progress, 0.01, f"Cached subset contains {len(flagged)} clip(s) excluded by the content filter "
+                               f"({', '.join(flagged[:5])}) - rebuilding")
+        elif all((cfg.videos_dir / f"{v['video_id']}.mp4").exists() for v in subset["index"]):
             _p(progress, 1.0, "Subset already prepared (cached)")
             return subset
 
@@ -341,7 +361,7 @@ def prepare_subset(cfg: Config, progress: ProgressFn = None, force: bool = False
             continue
         (by_cat_test if rec["split"] == "test1k" else by_cat_other)[rec["category"]].append(vid)
 
-    index, used = [], set()
+    index, used, excluded = [], set(), []
     n_cat = 20
     for ci, c in enumerate(range(n_cat)):
         _p(progress, 0.40 + 0.25 * ci / n_cat, f"Sampling + validating index clips for '{cat_names[c]}'")
@@ -353,6 +373,9 @@ def prepare_subset(cfg: Config, progress: ProgressFn = None, force: bool = False
         for vid in pool_a + pool_b:
             if len(chosen) == cfg.videos_per_category:
                 break
+            if is_sensitive(table[vid]["captions"]):
+                excluded.append(vid)
+                continue
             path = archive.extract(vid)
             if path is None:
                 continue
@@ -398,6 +421,9 @@ def prepare_subset(cfg: Config, progress: ProgressFn = None, force: bool = False
             for vid in pool:
                 if got == n_train_per_cat:
                     break
+                if is_sensitive(table[vid]["captions"]):
+                    excluded.append(vid)
+                    continue
                 if archive.extract(vid) is None:
                     continue
                 train.append({"video_id": vid, "category": c, "captions": table[vid]["captions"][:20]})
@@ -418,7 +444,7 @@ def prepare_subset(cfg: Config, progress: ProgressFn = None, force: bool = False
               "protocol": {"videos_per_category": cfg.videos_per_category,
                            "captions_per_video": cfg.captions_per_video,
                            "n_index": len(index), "n_queries": len(queries), "n_train": len(train),
-                           "seed": cfg.seed}}
+                           "seed": cfg.seed, "n_excluded_by_content_filter": len(set(excluded))}}
     cfg.subset_path.parent.mkdir(parents=True, exist_ok=True)
     cfg.subset_path.write_text(json.dumps(subset, indent=1))
     _p(progress, 1.0, f"Prepared {len(index)} index clips, {len(queries)} queries, {len(train)} training clips")

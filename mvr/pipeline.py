@@ -52,10 +52,13 @@ def get_encoder(cfg: Config):
 # Step 2: feature extraction
 # ---------------------------------------------------------------------------
 def step_features(cfg: Config, progress: ProgressFn = None, force: bool = False) -> dict:
-    if cfg.features_path.exists() and not force:
-        _p(progress, 1.0, "Features already extracted (cached)")
-        return dict(np.load(cfg.features_path, allow_pickle=True))
     subset = load_subset(cfg)
+    if cfg.features_path.exists() and not force:
+        cached = dict(np.load(cfg.features_path, allow_pickle=True))
+        if subset is not None and _same_ids(cached, subset):
+            _p(progress, 1.0, "Features already extracted (cached)")
+            return cached
+        _p(progress, 0.0, "Index/training clips changed since the cached features were computed - re-extracting")
     if subset is None:
         raise RuntimeError("Run the data step first.")
     enc = get_encoder(cfg)
@@ -104,7 +107,9 @@ def step_features(cfg: Config, progress: ProgressFn = None, force: bool = False)
             train_text[i, j] = e
             text_mask[i, j] = True
 
-    out = {"index_frames": index_frames.astype(np.float32), "query_emb": query_emb.astype(np.float32),
+    out = {"index_ids": np.array([v["video_id"] for v in subset["index"]]),
+           "query_texts": np.array([q["text"] for q in subset["queries"]]),
+           "index_frames": index_frames.astype(np.float32), "query_emb": query_emb.astype(np.float32),
            "train_frames": train_frames.astype(np.float32), "train_text": train_text, "text_mask": text_mask,
            "train_ids": np.array([t["video_id"] for t in train_items]),
            "timing": np.array(json.dumps({
@@ -115,6 +120,16 @@ def step_features(cfg: Config, progress: ProgressFn = None, force: bool = False)
     np.savez_compressed(cfg.features_path, **out)
     _p(progress, 1.0, f"Saved features to {cfg.features_path.name}")
     return out
+
+
+def _same_ids(F: dict, subset: dict) -> bool:
+    """Cached features are valid only for exactly the same index clips, queries and training clips."""
+    try:
+        return (list(F["index_ids"]) == [v["video_id"] for v in subset["index"]]
+                and list(F["query_texts"]) == [q["text"] for q in subset["queries"]]
+                and set(F["train_ids"]) <= {t["video_id"] for t in subset["train"]})
+    except KeyError:
+        return False
 
 
 def load_features(cfg: Config) -> dict | None:
@@ -139,6 +154,13 @@ def step_train(cfg: Config, progress: ProgressFn = None, force: bool = False) ->
     dev = cfg.resolved_device()
     tau, tau_curve = select_tau(F["train_frames"], F["train_text"], F["text_mask"])
     cfg.models_dir.mkdir(parents=True, exist_ok=True)
+    # heads must be retrained if the training pool changed (e.g. clips removed by the content filter)
+    train_ids = sorted(str(x) for x in F["train_ids"])
+    pool_file = cfg.models_dir / f"train_pool_T{cfg.num_frames}.json"
+    if not force and (not pool_file.exists() or json.loads(pool_file.read_text()) != train_ids):
+        if any(cfg.models_dir.glob(f"*_T{cfg.num_frames}_seed*.pt")):
+            _p(progress, 0.0, "Training pool changed since the cached heads were trained - retraining")
+        force = True
     (cfg.models_dir / "tau.json").write_text(json.dumps({"tau": tau, "grid_mrr": tau_curve}))
     jobs = [(a, s) for a in LEARNED_METHODS for s in cfg.train_seeds]
     hists = {}
@@ -154,6 +176,7 @@ def step_train(cfg: Config, progress: ProgressFn = None, force: bool = False) ->
                                 progress=lambda f, m: _p(progress, lo + (hi - lo) * f, m))
         save_head(head, hist, p)
         hists[f"{arch}_seed{seed}"] = hist
+    pool_file.write_text(json.dumps(train_ids))   # written only after ALL heads match this pool
     _p(progress, 1.0, f"Trained {len(jobs)} temporal heads (query-attention tau={tau})")
     return hists
 
@@ -205,7 +228,10 @@ def load_index(cfg: Config) -> VideoIndex | None:
 # ---------------------------------------------------------------------------
 def step_xclip(cfg: Config, progress: ProgressFn = None, force: bool = False) -> str:
     out = Path(cfg.artifacts_dir) / "xclip_scores.npy"
-    if out.exists() and not force:
+    ids_file = out.with_suffix(".ids.json")
+    cur = load_subset(cfg)
+    sig = {"index": [v["video_id"] for v in cur["index"]], "queries": [q["text"] for q in cur["queries"]]} if cur else None
+    if out.exists() and not force and ids_file.exists() and json.loads(ids_file.read_text()) == sig:
         return "cached"
     if not cfg.use_xclip:
         return "disabled"
@@ -223,6 +249,7 @@ def step_xclip(cfg: Config, progress: ProgressFn = None, force: bool = False) ->
         _p(progress, 0.75, "X-CLIP scoring 200 queries x 100 videos")
         S = xs.score_matrix([q["text"] for q in subset["queries"]], pix)
         np.save(out, S)
+        ids_file.write_text(json.dumps(sig))
         (Path(cfg.artifacts_dir) / "xclip_error.txt").unlink(missing_ok=True)
         _p(progress, 1.0, "X-CLIP done")
         return "ok"
@@ -278,7 +305,9 @@ def step_eval(cfg: Config, progress: ProgressFn = None) -> dict:
         per_query[m] = {"rank_seed0": ranks[0].tolist(), "rr_mean": (1 / ranks).mean(0).tolist(),
                         **{f"hit@{k}": (ranks <= k).mean(0).tolist() for k in ks}}
     xs_path = Path(cfg.artifacts_dir) / "xclip_scores.npy"
-    if xs_path.exists():
+    xs_ids = xs_path.with_suffix(".ids.json")
+    xs_ok = xs_ids.exists() and json.loads(xs_ids.read_text()).get("index") == [v["video_id"] for v in subset["index"]]
+    if xs_path.exists() and xs_ok:
         S = np.load(xs_path)
         if S.shape == (len(Q), len(fr)):
             t2v["xclip"] = summarize_ranks(t2v_ranks(S, gt), ks)
