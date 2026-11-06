@@ -69,6 +69,28 @@ def step_features(cfg: Config, progress: ProgressFn = None, force: bool = False)
     cache_dir = Path(cfg.artifacts_dir) / "clip_cache" / f"{cfg.model_tag}_T{T}"
     cache_dir.mkdir(parents=True, exist_ok=True)
     timing_file = cache_dir / "timing.json"
+    # Re-use clips already encoded by an earlier (complete) run: seed the per-clip cache from the old
+    # features file, so only clips that are new in the current selection have to be encoded.
+    if cfg.features_path.exists():
+        try:
+            old = dict(np.load(cfg.features_path, allow_pickle=True))
+            n_seed = 0
+            pairs = [(str(v), old["train_frames"][i], old["train_text"][i][old["text_mask"][i]])
+                     for i, v in enumerate(old.get("train_ids", []))]
+            if "index_ids" in old:
+                pairs += [(str(v), old["index_frames"][i], None) for i, v in enumerate(old["index_ids"])]
+            for vid, frames_f, caps_e in pairs:
+                if frames_f.shape[0] != T:
+                    continue
+                if not (cache_dir / f"{vid}.npy").exists():
+                    np.save(cache_dir / f"{vid}.npy", frames_f.astype(np.float32))
+                    n_seed += 1
+                if caps_e is not None and len(caps_e) and not (cache_dir / f"{vid}_captions.npy").exists():
+                    np.save(cache_dir / f"{vid}_captions.npy", caps_e.astype(np.float32))
+            if n_seed:
+                _p(progress, 0.0, f"Re-using {n_seed} clips encoded by an earlier run")
+        except Exception as e:
+            _p(progress, 0.0, f"Could not re-use earlier features ({e}); encoding from scratch")
     timing = json.loads(timing_file.read_text()) if timing_file.exists() else {"n": 0, "dec": 0.0, "enc": 0.0}
 
     def encode_videos(items, lo, hi, label):
