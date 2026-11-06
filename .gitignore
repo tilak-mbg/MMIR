@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+data/
+artifacts/
+.streamlit/secrets.toml
+.DS_Store
+.ipynb_checkpoints/

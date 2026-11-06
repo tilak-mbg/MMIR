@@ -1,0 +1,17 @@
+# Python >= 3.9. Install with:  pip install -r requirements.txt
+# (on the BITS GPU lab, install the CUDA build of torch that matches the driver if torch is not already present)
+torch>=2.0
+torchvision>=0.15
+transformers>=4.36
+huggingface_hub>=0.20
+streamlit>=1.40
+altair>=5.0
+pandas>=1.5
+numpy>=1.23
+scipy>=1.9
+opencv-python>=4.7          # use the lab's opencv-python; do not add -headless alongside it
+Pillow>=9.0
+faiss-cpu>=1.7.4
+matplotlib>=3.6
+python-docx>=1.0
+imageio-ffmpeg>=0.4.9   # used only to transcode clips to H.264 if a browser cannot play them

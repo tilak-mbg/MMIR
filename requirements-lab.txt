@@ -1,0 +1,10 @@
+# BITS Virtual Lab (Python 3.10). The lab already provides: PyTorch, NumPy, Pandas, SciPy,
+# Matplotlib, opencv-python, ffmpeg. Install ONLY the missing packages:
+#     pip install -r requirements-lab.txt
+# (transformers is kept < 5 so pip never tries to upgrade the lab's PyTorch)
+transformers>=4.40,<5
+huggingface_hub>=0.23,<1.0
+streamlit>=1.40
+altair>=5.0
+faiss-cpu>=1.7.4
+python-docx>=1.0

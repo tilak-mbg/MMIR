@@ -1,0 +1,102 @@
+# Assignment 2 – Natural-Language Video Retrieval Using MSR-VTT
+
+Text-to-video retrieval with semantic (CLIP) and temporal video representations, served through a Streamlit dashboard.
+
+* **Index:** 100 MSR-VTT clips (5 × 20 categories, from the 1k-A test split)
+* **Queries:** 200 (2 human captions per clip) → 200 × 100 search matrix
+* **Research Investigation 1:** mean pooling vs explicit temporal modelling (controlled ablation ladder + significance tests + positive control)
+
+## 1. Run in the BITS Virtual Lab
+
+The lab image (Python 3.10) already has PyTorch, NumPy, Pandas, SciPy, Matplotlib, opencv-python and ffmpeg,
+so install only the missing packages (tested on Python 3.10 + torch 2.2 + transformers 4.40 + streamlit 1.65):
+
+```bash
+cd MIR_Assignment2
+pip install -r requirements-lab.txt      # transformers, huggingface_hub, streamlit, altair, faiss-cpu, python-docx
+streamlit run app.py                     # then open http://localhost:8501 in the lab's Chrome
+```
+
+Lab session rules to keep in mind: the VM terminates after **15 min of inactivity** (move the mouse / click a tab
+while the pipeline runs) and files are likely lost when the session ends, so do the full run, screenshots and
+report download **in one session** and copy the report out before closing. Without a GPU, *CPU-fast mode*
+(on by default) caps training at 25 clips/category and 20 epochs; the whole run then takes roughly 20-30 min.
+
+In the browser:
+
+1. **⚙️ Pipeline Runner** → (optional: pick backbone / frames / training size → *Save settings*) → **▶️ Run full pipeline**.
+   First run downloads ~2.3 GB (MSR-VTT annotations + `MSRVTT_Videos.zip`) and the CLIP / X-CLIP weights from Hugging Face,
+   then extracts frames, encodes them, trains the temporal heads, builds the FAISS index and evaluates.
+   Expected time on a GPU: ~10–20 min (mostly the download). Everything is cached in `data/` and `artifacts/`; later runs are instant.
+2. **🔎 Text → Video Search** – type any query, choose the representation and Top-K → playable clips + scores.
+3. **🎞️ Video → Text** – reverse modality.
+4. **📊 Evaluation**, **🔬 Research Investigation** – tables, charts, significance tests, conclusions.
+5. **📄 Report** → *Generate / refresh report* → download `MIR_Assignment2_Technical_Report.docx`
+   (all numbers/figures come from your run). Fill in the group names/IDs and paste the screenshots into Appendix A.
+
+CLI alternative (not required): `python run_pipeline.py --report`.
+
+### If something goes wrong
+
+| Symptom | Fix |
+|---|---|
+| Hugging Face blocked / slow | Download the repo `friedrichor/MSR-VTT` (files `msrvtt_test_1k.json`, `msrvtt_train_9k.json`, `raw_data/`, `MSRVTT_Videos.zip`) to a folder and enter it in *Offline mirror* on the Pipeline Runner page. Alternatively drop `.mp4` files into `data/msrvtt/videos_manual/`. |
+| GPU out of memory | Pipeline Runner → Device `cpu` or keep ViT-B/32; lower *Training clips per category*. |
+| X-CLIP fails | It is optional (external reference). The error is shown in an expander; untick it and re-run step 6. |
+| Videos don't play in the browser | `pip install imageio-ffmpeg`, then *Force re-run* step 1 (clips are transcoded to H.264). |
+
+## 2. Rubric mapping
+
+| Rubric item | Where |
+|---|---|
+| 1. Data ingestion & feature engineering (2.0) | `mvr/data.py` (stratified 5×20 sampling, OpenCV segment-midpoint frame decoding, validation, thumbnails), `mvr/encoders.py` (CLIP ViT frame embeddings), `mvr/index.py` (FAISS IndexFlatIP) |
+| 2. Cross-modal embedding & retrieval (2.5) | `mvr/encoders.py` (shared CLIP space), `mvr/index.py` (cosine Top-K), `mvr/query.py` (empty/unicode/unknown-word/typo/short/long/non-English handling) + robustness study |
+| 3. Streamlit dashboard (2.0) | `app.py` – 8 pages; pipeline runs from the UI; playable Top-K clips with scores |
+| 4. Quantitative evaluation (1.5) | `mvr/metrics.py` – R@1/5/10, MRR, mAP, nDCG@10, MdR, MnR (T2V and V2T); tables + charts in dashboard and report |
+| 5. Research investigation & report (2.0) | `mvr/pipeline.py` (ablation ladder, frame sweep, order ablation, temporal-language split, significance tests), `mvr/control.py` (positive control), `mvr/analysis.py` (data-driven conclusions), `mvr/report.py` (.docx) |
+
+## 3. Method summary
+
+Frames (T = 16 segment mid-points) → frozen CLIP ViT → 512-d unit vectors. Video representations:
+
+| | Representation | Frame order | Trained |
+|---|---|---|---|
+| 0 | Single middle frame | – | no |
+| 1 | **Mean pooling (baseline)** | no | no |
+| 1b | Max pooling, query-attentive pooling | no | no |
+| 2 | MLP adapter (control for domain adaptation) | no | yes |
+| 3 | Set Transformer (no positions) | no | yes |
+| 4 | Temporal Transformer (+ positions) | **yes** | yes |
+| 4b | Temporal LSTM | **yes** | yes |
+| ext | X-CLIP (pre-trained video model) | yes | pre-trained |
+
+Learned heads: residual, zero-initialised (start = mean pooling), symmetric InfoNCE on a disjoint MSR-VTT training pool,
+3 seeds, early stopping on held-out training clips. Statistics: paired bootstrap 95% CIs, Wilcoxon signed-rank, Holm correction.
+
+## 4. Project layout
+
+```
+app.py                 Streamlit dashboard (entry point)
+run_pipeline.py        optional CLI
+mvr/config.py          settings (also editable from the UI)
+mvr/data.py            download, sampling, frame decoding
+mvr/encoders.py        CLIP / X-CLIP encoders
+mvr/temporal.py        pooling + learned temporal heads + training
+mvr/index.py           FAISS vector index
+mvr/query.py           query processing / edge cases
+mvr/metrics.py         IR metrics + significance tests
+mvr/pipeline.py        orchestration + experiments
+mvr/control.py         positive-control experiment
+mvr/analysis.py        data-driven conclusions
+mvr/figures.py         report figures
+mvr/report.py          .docx report generator
+tests/                 offline smoke-test fixture + temporal-head sanity test
+```
+
+## 5. Offline tests (no internet needed)
+
+```bash
+python tests/test_temporal_sanity.py     # order-aware heads must beat order-free heads on an order-only task
+```
+`tests/make_synthetic_fixture.py` builds a fake HF repo + tiny random CLIP/X-CLIP used to smoke-test the whole pipeline
+(`MVR_LOCAL_REPO_DIR`, `MVR_CLIP_MODEL`, `MVR_XCLIP_MODEL`, `MVR_DATA_DIR`, `MVR_ARTIFACTS_DIR` env vars).
