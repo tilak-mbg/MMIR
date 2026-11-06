@@ -6,6 +6,16 @@ Text-to-video retrieval with semantic (CLIP) and temporal video representations,
 * **Queries:** 200 (2 human captions per clip) → 200 × 100 search matrix
 * **Research Investigation 1:** mean pooling vs explicit temporal modelling (controlled ablation ladder + significance tests + positive control)
 
+## Quick start in the BITS lab (fresh or re-provisioned VM)
+
+```bash
+mkdir -p ~/workspace/Tilak && cd ~/workspace/Tilak
+git clone https://github.com/tilak-mbg/MMIR.git      # or: cd MMIR && git pull
+cd MMIR && bash setup_lab.sh                          # venv + packages + kernel + Jupyter
+```
+Then open `MIR_Assignment2.ipynb`, pick kernel **Python (mmir-venv)** and run **Kernel → Restart & Run All**.
+If the session ends, run `bash setup_lab.sh` again and Restart & Run All – finished work is reused.
+
 ## 0. Graded deliverable: `MIR_Assignment2.ipynb`
 
 The course requires a Jupyter notebook with outputs. `MIR_Assignment2.ipynb` contains **all source code** (written to disk
