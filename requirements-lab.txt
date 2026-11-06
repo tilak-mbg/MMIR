@@ -1,6 +1,11 @@
-# BITS Virtual Lab (Python 3.10). The lab already provides: PyTorch, NumPy, Pandas, SciPy,
-# Matplotlib, opencv-python, ffmpeg. Install ONLY the missing packages:
-#     pip install -r requirements-lab.txt
+# BITS Virtual Lab (system Python 3.9 in /opt/aiml-python, read-only). The lab already provides:
+# PyTorch, NumPy, Pandas, SciPy, Matplotlib, opencv-python, ffmpeg. Install ONLY the missing
+# packages into your own venv that inherits the lab's packages (keep the lab's NumPy):
+#     python -m venv ~/workspace/mmir-venv
+#     echo "/opt/aiml-python/lib/python3.9/site-packages" > ~/workspace/mmir-venv/lib/python3.9/site-packages/aiml.pth
+#     source ~/workspace/mmir-venv/bin/activate
+#     pip freeze | grep -i "^numpy==" > lab-constraints.txt
+#     pip install -r requirements-lab.txt -c lab-constraints.txt
 # (transformers is kept < 5 so pip never tries to upgrade the lab's PyTorch)
 transformers>=4.40,<5
 huggingface_hub>=0.23,<1.0

@@ -8,13 +8,18 @@ Text-to-video retrieval with semantic (CLIP) and temporal video representations,
 
 ## 1. Run in the BITS Virtual Lab
 
-The lab image (Python 3.10) already has PyTorch, NumPy, Pandas, SciPy, Matplotlib, opencv-python and ffmpeg,
-so install only the missing packages (tested on Python 3.10 + torch 2.2 + transformers 4.40 + streamlit 1.65):
+The lab image (system Python 3.9, read-only) already has PyTorch, NumPy, Pandas, SciPy, Matplotlib, opencv-python and ffmpeg,
+so install only the missing packages (tested on Python 3.10 + torch 2.2 + transformers 4.40 + streamlit 1.65; compiles on 3.9):
 
 ```bash
 cd MIR_Assignment2
-pip install -r requirements-lab.txt      # transformers, huggingface_hub, streamlit, altair, faiss-cpu, python-docx
-streamlit run app.py                     # then open http://localhost:8501 in the lab's Chrome
+# /opt/aiml-python is a read-only virtualenv: create your own venv that ALSO sees the lab's packages
+python -m venv ~/workspace/mmir-venv
+echo "/opt/aiml-python/lib/python3.9/site-packages" > ~/workspace/mmir-venv/lib/python3.9/site-packages/aiml.pth
+source ~/workspace/mmir-venv/bin/activate
+pip freeze | grep -i "^numpy==" > lab-constraints.txt     # keep the lab's NumPy
+pip install -r requirements-lab.txt -c lab-constraints.txt
+python -m streamlit run app.py           # then open http://localhost:8501 in the lab's Chrome
 ```
 
 Lab session rules to keep in mind: the VM terminates after **15 min of inactivity** (move the mouse / click a tab

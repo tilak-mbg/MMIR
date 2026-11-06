@@ -5,3 +5,4 @@ artifacts/
 .streamlit/secrets.toml
 .DS_Store
 .ipynb_checkpoints/
+lab-constraints.txt
