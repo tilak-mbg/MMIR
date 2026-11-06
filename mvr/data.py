@@ -343,6 +343,18 @@ def prepare_subset(cfg: Config, progress: ProgressFn = None, force: bool = False
             _p(progress, 0.01, f"Cached subset contains {len(flagged)} clip(s) excluded by the content filter "
                                f"({', '.join(flagged[:5])}) - rebuilding")
         elif all((cfg.videos_dir / f"{v['video_id']}.mp4").exists() for v in subset["index"]):
+            # honour a smaller training-pool setting without re-sampling (keep the first N per category)
+            cap, kept, per = cfg.eff_train_per_cat(), [], defaultdict(int)
+            for t in subset["train"]:
+                if per[t["category"]] < cap:
+                    kept.append(t)
+                    per[t["category"]] += 1
+            if len(kept) < len(subset["train"]):
+                _p(progress, 0.5, f"Training pool reduced from {len(subset['train'])} to {len(kept)} clips "
+                                  f"({cap} per category)")
+                subset["train"] = kept
+                subset["protocol"]["n_train"] = len(kept)
+                cfg.subset_path.write_text(json.dumps(subset, indent=1))
             _p(progress, 1.0, "Subset already prepared (cached)")
             return subset
 
