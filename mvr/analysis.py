@@ -139,6 +139,20 @@ def research_conclusions(R: dict) -> dict:
         answer = ("Learned temporal heads were not trained in this run, so only parameter-free aggregators can be "
                   "compared; see the frame-sweep and order-ablation sections.")
 
+    xc = t2v.get("xclip")
+    if xc:
+        if xc["MRR"] < mp["MRR"] - 0.05:
+            pts.append(f"The off-the-shelf spatio-temporal model X-CLIP (fine-tuned on Kinetics-400 action labels) reaches "
+                       f"only R@1={xc['R@1']:.1f}% / MRR={xc['MRR']:.3f} (median rank {xc['MdR']:.0f}) versus "
+                       f"{mp['R@1']:.1f}% / {mp['MRR']:.3f} for mean-pooled CLIP. Its text tower was adapted to ~400 "
+                       f"short action-class names, so it does not transfer to free-form MSR-VTT captions: a model "
+                       f"that natively encodes time is not automatically better - large-scale image-text alignment "
+                       f"matters more than temporal architecture for this task.")
+        else:
+            pts.append(f"The off-the-shelf spatio-temporal model X-CLIP reaches R@1={xc['R@1']:.1f}% / MRR={xc['MRR']:.3f} "
+                       f"versus {mp['R@1']:.1f}% / {mp['MRR']:.3f} for mean-pooled CLIP"
+                       + (" - a native video architecture gives a measurable advantage." if xc["MRR"] > mp["MRR"] + 0.02
+                          else " - no clear advantage from a native video architecture."))
     pc = R.get("positive_control", {}).get("mrr")
     if pc:
         pts.append(f"Positive control: on a synthetic task where only frame ORDER distinguishes clips, mean pooling "

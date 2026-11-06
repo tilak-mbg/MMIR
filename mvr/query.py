@@ -69,17 +69,30 @@ class SpellCorrector:
         inserts = [a + c + b for a, b in splits for c in self.letters]
         return set(deletes + transposes + replaces + inserts)
 
-    def correct(self, w: str) -> str | None:
-        if w in self.counts:
+    def correct(self, w: str, in_clip_vocab: bool = False) -> str | None:
+        """Return a correction for ``w`` or None.
+
+        Crowd-sourced MSR-VTT captions themselves contain typos (e.g. 'playng'), so
+        presence in the lexicon is not proof of correctness: a word is corrected when an
+        edit-distance neighbour is MUCH more frequent than the word itself.
+        """
+        own = self.counts.get(w, 0)
+        if own >= 1000:                       # clearly a real, common word
             return None
-        c1 = [e for e in self._edits1(w) if e in self.counts]
-        if c1:
-            return max(c1, key=self.counts.get)
-        if len(w) >= 5:
-            c2 = {e2 for e1 in self._edits1(w) for e2 in self._edits1(e1) if e2 in self.counts}
-            if c2:
-                return max(c2, key=self.counts.get)
-        return None
+        cands = {e for e in self._edits1(w) if e in self.counts and e != w}
+        if not cands and own == 0 and len(w) >= 5:
+            cands = {e2 for e1 in self._edits1(w) for e2 in self._edits1(e1) if e2 in self.counts and e2 != w}
+        if not cands:
+            return None
+        best = max(cands, key=self.counts.get)
+        f = self.counts[best]
+        if own > 0:
+            need = max(20, 50 * own)          # rare variant of a very frequent word -> typo
+        elif in_clip_vocab:
+            need = 500                        # unseen in captions but a real BPE word: be conservative
+        else:
+            need = 5
+        return best if f >= need else None
 
 
 def build_lexicon(captions) -> Counter:
@@ -107,11 +120,9 @@ class QueryProcessor:
         s = re.sub(r"\s+", " ", s).strip().strip("\"'`")
         return s[:MAX_CHARS]
 
-    def _known(self, w: str) -> bool:
-        if w in self.lexicon:
-            return True
+    def _in_clip_vocab(self, w: str) -> bool:
         try:
-            return self.enc.in_vocab(w)
+            return bool(self.enc.in_vocab(w))
         except Exception:
             return True
 
@@ -165,13 +176,17 @@ class QueryProcessor:
         text = norm
         for w in words:
             lw = w.lower()
-            if len(lw) < 3 or self._known(lw):
+            if len(lw) < 3 or lw.isdigit():
                 continue
-            pq.unknown_words.append(w)
-            fix = self.speller.correct(lw) if self.speller else None
-            if fix and auto_correct:
-                pq.corrections[w] = fix
-                text = re.sub(rf"\b{re.escape(w)}\b", fix, text)
+            in_vocab = self._in_clip_vocab(lw)
+            fix = self.speller.correct(lw, in_vocab) if self.speller else None
+            if fix:
+                pq.unknown_words.append(w)
+                if auto_correct:
+                    pq.corrections[w] = fix
+                    text = re.sub(rf"\b{re.escape(w)}\b", fix, text)
+            elif lw not in self.lexicon and not in_vocab:
+                pq.unknown_words.append(w)
         if pq.unknown_words:
             if pq.corrections:
                 pq.steps.append("spelling corrected: " + ", ".join(f"{k}->{v}" for k, v in pq.corrections.items()))

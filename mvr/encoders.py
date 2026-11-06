@@ -21,7 +21,7 @@ CLIP_MEAN = (0.48145466, 0.4578275, 0.40821073)
 CLIP_STD = (0.26862954, 0.26130258, 0.27577711)
 
 
-def preprocess_frames(frames: Sequence[np.ndarray], size: int = 224):
+def preprocess_frames(frames: Sequence[np.ndarray], size: int = 224, mean=CLIP_MEAN, std=CLIP_STD):
     """CLIP pre-processing: bicubic resize of the short side -> centre crop ->
     scale to [0,1] -> per-channel normalisation. Returns float tensor (N,3,S,S)."""
     import torch
@@ -38,9 +38,9 @@ def preprocess_frames(frames: Sequence[np.ndarray], size: int = 224):
         im = im.crop((left, top, left + size, top + size))
         out.append(np.asarray(im, dtype=np.float32) / 255.0)
     x = torch.from_numpy(np.stack(out)).permute(0, 3, 1, 2)
-    mean = torch.tensor(CLIP_MEAN).view(1, 3, 1, 1)
-    std = torch.tensor(CLIP_STD).view(1, 3, 1, 1)
-    return (x - mean) / std
+    m = torch.tensor(mean, dtype=torch.float32).view(1, 3, 1, 1)
+    s = torch.tensor(std, dtype=torch.float32).view(1, 3, 1, 1)
+    return (x - m) / s
 
 
 def _l2n(x: np.ndarray) -> np.ndarray:
@@ -124,10 +124,19 @@ class XClipScorer:
         self.num_frames = int(getattr(self.model.config.vision_config, "num_frames", 8))
         self.image_size = int(self.model.config.vision_config.image_size)
         self.torch = torch
+        # use the normalisation the checkpoint was trained with (X-CLIP ships ImageNet mean/std)
+        self.mean, self.std = CLIP_MEAN, CLIP_STD
+        try:
+            from transformers import AutoImageProcessor
+            ip = AutoImageProcessor.from_pretrained(model_name)
+            if getattr(ip, "image_mean", None) and getattr(ip, "image_std", None):
+                self.mean, self.std = tuple(ip.image_mean), tuple(ip.image_std)
+        except Exception:
+            pass
 
     def video_pixels(self, frames: Sequence[np.ndarray]):
         idx = np.linspace(0, len(frames) - 1, self.num_frames).round().astype(int)
-        return preprocess_frames([frames[i] for i in idx], self.image_size)  # (T,3,H,W)
+        return preprocess_frames([frames[i] for i in idx], self.image_size, self.mean, self.std)  # (T,3,H,W)
 
     def score_matrix(self, texts: Sequence[str], videos_pixels: list, batch_videos: int = 8) -> np.ndarray:
         torch = self.torch
