@@ -66,6 +66,10 @@ md("## 0. Environment check")
 code(r"""
 # Verify the interpreter and that every required library is importable (versions are printed for reproducibility).
 import sys, os, glob, platform, importlib
+# BITS lab: only ~/workspace survives a VM shutdown, so keep the Hugging Face model cache there too.
+if os.path.isdir(os.path.expanduser("~/workspace")):
+    os.environ.setdefault("HF_HOME", os.path.expanduser("~/workspace/hf_cache"))
+print("HF_HOME:", os.environ.get("HF_HOME", "(default ~/.cache/huggingface)"))
 # If this kernel is the lab's default Python, also use the packages installed in ~/workspace/mmir-venv.
 for sp in glob.glob(os.path.expanduser("~/workspace/mmir-venv/lib/python3*/site-packages")):
     if sp not in sys.path:

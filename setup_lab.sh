@@ -35,6 +35,7 @@ fi
 python -m ipykernel install --user --name mmir-venv --display-name "Python (mmir-venv)" >/dev/null
 echo ">> kernel 'Python (mmir-venv)' registered"
 
+export HF_HOME="$HOME/workspace/hf_cache"     # only ~/workspace survives a VM shutdown
 export MVR_TRAIN_VIDEOS_PER_CATEGORY="${TRAIN_PER_CAT:-10}"
 echo ">> training clips per category: $MVR_TRAIN_VIDEOS_PER_CATEGORY"
 echo ">> starting Jupyter - open MIR_Assignment2.ipynb, kernel 'Python (mmir-venv)', Kernel -> Restart & Run All"
